@@ -1,14 +1,9 @@
-use std::convert::From;
-use std::io::{self, Read, Write};
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::{
+    io::{self, Read, Write},
+    os::unix::io::{AsRawFd, FromRawFd, RawFd},
+};
 
 pub struct TunIo(RawFd);
-
-impl From<RawFd> for TunIo {
-    fn from(fd: RawFd) -> Self {
-        Self(fd)
-    }
-}
 
 impl FromRawFd for TunIo {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
@@ -23,12 +18,14 @@ impl AsRawFd for TunIo {
 }
 
 impl Read for TunIo {
+    #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.recv(buf)
     }
 }
 
 impl Write for TunIo {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.send(buf)
     }
@@ -43,7 +40,7 @@ impl Write for TunIo {
 }
 
 impl TunIo {
-    pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+    fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
         let n = unsafe { libc::read(self.0, buf.as_ptr() as *mut _, buf.len() as _) };
         if n < 0 {
             return Err(io::Error::last_os_error());
@@ -51,7 +48,7 @@ impl TunIo {
         Ok(n as _)
     }
 
-    pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
+    fn send(&self, buf: &[u8]) -> io::Result<usize> {
         let n = unsafe { libc::write(self.0, buf.as_ptr() as *const _, buf.len() as _) };
         if n < 0 {
             return Err(io::Error::last_os_error());
@@ -62,6 +59,8 @@ impl TunIo {
 
 impl Drop for TunIo {
     fn drop(&mut self) {
+        // SAFETY:
+        // drop have exclusive access to fd.
         unsafe { libc::close(self.0) };
     }
 }

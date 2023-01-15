@@ -1,4 +1,3 @@
-#[cfg(target_os = "linux")]
 mod linux {
     pub mod address;
     pub mod interface;
@@ -8,9 +7,10 @@ mod linux {
 }
 
 mod builder;
+mod error;
 mod tun;
 
-pub mod result;
+pub use self::{builder::TunBuilder, error::Error, tun::Tun};
 
-pub use self::builder::TunBuilder;
-pub use self::tun::Tun;
+#[cfg(not(target_os = "linux"))]
+compile_error!("tokio-tun only support linux OS");

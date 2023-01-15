@@ -1,27 +1,23 @@
-use crate::linux::interface::Interface;
-use crate::linux::io::TunIo;
-use crate::linux::params::Params;
-use crate::result::Result;
-use std::io;
-use std::io::{Read, Write};
+use core::{
+    pin::Pin,
+    task::{self, ready, Context, Poll},
+};
+
 use std::net::Ipv4Addr;
 use std::os::raw::c_char;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{self, Context, Poll};
-use tokio::io::unix::AsyncFd;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use std::{
+    io::{self, Read, Write},
+    os::fd::FromRawFd,
+};
 
-// Taken from the `futures` crate
-macro_rules! ready {
-    ($e:expr $(,)?) => {
-        match $e {
-            std::task::Poll::Ready(t) => t,
-            std::task::Poll::Pending => return std::task::Poll::Pending,
-        }
-    };
-}
+use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
+
+use crate::error::Error;
+use crate::linux::interface::Interface;
+use crate::linux::io::TunIo;
+use crate::linux::params::Params;
 
 /// Represents a Tun/Tap device. Use [`TunBuilder`](struct.TunBuilder.html) to create a new instance of [`Tun`](struct.Tun.html).
 pub struct Tun {
@@ -41,9 +37,9 @@ impl AsyncRead for Tun {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> task::Poll<io::Result<()>> {
-        let self_mut = self.get_mut();
+        let this = self.get_mut();
         loop {
-            let mut guard = ready!(self_mut.io.poll_read_ready_mut(cx))?;
+            let mut guard = ready!(this.io.poll_read_ready_mut(cx))?;
 
             match guard.try_io(|inner| inner.get_mut().read(buf.initialize_unfilled())) {
                 Ok(Ok(n)) => {
@@ -86,37 +82,25 @@ impl AsyncWrite for Tun {
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> task::Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> task::Poll<io::Result<()>> {
+        self.poll_flush(cx)
     }
 }
 
 impl Tun {
     /// Creates a new instance of Tun/Tap device.
-    pub(crate) fn new(params: Params) -> Result<Self> {
+    pub(crate) fn new(params: Params) -> Result<Self, Error> {
         let iface = Self::allocate(params, 1)?;
         let fd = iface.files()[0];
         Ok(Self {
             iface: Arc::new(iface),
-            io: AsyncFd::new(TunIo::from(fd))?,
+            // SAFETY:
+            // TODO. currently this is not safe.
+            io: AsyncFd::new(unsafe { FromRawFd::from_raw_fd(fd) })?,
         })
     }
 
-    /// Creates a new instance of Tun/Tap device.
-    pub(crate) fn new_mq(params: Params, queues: usize) -> Result<Vec<Self>> {
-        let iface = Self::allocate(params, queues)?;
-        let mut tuns = Vec::with_capacity(queues);
-        let iface = Arc::new(iface);
-        for &fd in iface.files() {
-            tuns.push(Self {
-                iface: iface.clone(),
-                io: AsyncFd::new(TunIo::from(fd))?,
-            })
-        }
-        Ok(tuns)
-    }
-
-    fn allocate(params: Params, queues: usize) -> Result<Interface> {
+    fn allocate(params: Params, queues: usize) -> Result<Interface, Error> {
         static TUN: &[u8] = b"/dev/net/tun\0";
 
         let fds = (0..queues)
@@ -137,84 +121,38 @@ impl Tun {
         Ok(iface)
     }
 
-    /// Receives a packet from the Tun/Tap interface
-    ///
-    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
-    pub async fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
-        loop {
-            let mut guard = self.io.readable().await?;
-
-            match guard.try_io(|inner| inner.get_ref().recv(buf)) {
-                Ok(res) => return res,
-                Err(_) => continue,
-            }
-        }
-    }
-
-    /// Sends a packet to the Tun/Tap interface
-    ///
-    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
-    pub async fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        loop {
-            let mut guard = self.io.writable().await?;
-
-            match guard.try_io(|inner| inner.get_ref().send(buf)) {
-                Ok(res) => return res,
-                Err(_) => continue,
-            }
-        }
-    }
-
-    /// Try to receive a packet from the Tun/Tap interface
-    ///
-    /// When there is no pending data, `Err(io::ErrorKind::WouldBlock)` is returned.
-    ///
-    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
-    pub fn try_recv(&self, buf: &mut [u8]) -> io::Result<usize> {
-        self.io.get_ref().recv(buf)
-    }
-
-    /// Try to send a packet to the Tun/Tap interface
-    ///
-    /// When the socket buffer is full, `Err(io::ErrorKind::WouldBlock)` is returned.
-    ///
-    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
-    pub fn try_send(&self, buf: &[u8]) -> io::Result<usize> {
-        self.io.get_ref().send(buf)
-    }
-
     /// Returns the name of Tun/Tap device.
     pub fn name(&self) -> &str {
         self.iface.name()
     }
 
     /// Returns the value of MTU.
-    pub fn mtu(&self) -> Result<i32> {
+    pub fn mtu(&self) -> Result<i32, Error> {
         self.iface.mtu(None)
     }
 
     /// Returns the IPv4 address of MTU.
-    pub fn address(&self) -> Result<Ipv4Addr> {
+    pub fn address(&self) -> Result<Ipv4Addr, Error> {
         self.iface.address(None)
     }
 
     /// Returns the IPv4 destination address of MTU.
-    pub fn destination(&self) -> Result<Ipv4Addr> {
+    pub fn destination(&self) -> Result<Ipv4Addr, Error> {
         self.iface.destination(None)
     }
 
     /// Returns the IPv4 broadcast address of MTU.
-    pub fn broadcast(&self) -> Result<Ipv4Addr> {
+    pub fn broadcast(&self) -> Result<Ipv4Addr, Error> {
         self.iface.broadcast(None)
     }
 
     /// Returns the IPv4 netmask address of MTU.
-    pub fn netmask(&self) -> Result<Ipv4Addr> {
+    pub fn netmask(&self) -> Result<Ipv4Addr, Error> {
         self.iface.netmask(None)
     }
 
     /// Returns the flags of MTU.
-    pub fn flags(&self) -> Result<i16> {
+    pub fn flags(&self) -> Result<i16, Error> {
         self.iface.flags(None)
     }
 }

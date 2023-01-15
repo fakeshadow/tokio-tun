@@ -1,8 +1,8 @@
-use super::params::Params;
-use super::request::ifreq;
-use crate::linux::address::Ipv4AddrExt;
-use crate::result::Result;
 use std::net::Ipv4Addr;
+
+use crate::error::Error;
+
+use super::{address::Ipv4AddrExt, params::Params, request::ifreq};
 
 nix::ioctl_write_int!(tunsetiff, b'T', 202);
 nix::ioctl_write_int!(tunsetpersist, b'T', 203);
@@ -31,7 +31,7 @@ pub struct Interface {
 }
 
 impl Interface {
-    pub fn new(fds: Vec<i32>, name: &str, mut flags: i16) -> Result<Self> {
+    pub fn new(fds: Vec<i32>, name: &str, mut flags: i16) -> Result<Self, Error> {
         let mut req = ifreq::new(name);
         if fds.len() > 1 {
             flags |= libc::IFF_MULTI_QUEUE as i16;
@@ -47,7 +47,7 @@ impl Interface {
         })
     }
 
-    pub fn init(&self, params: Params) -> Result<()> {
+    pub fn init(&self, params: Params) -> Result<(), Error> {
         if let Some(mtu) = params.mtu {
             self.mtu(Some(mtu))?;
         }
@@ -86,7 +86,7 @@ impl Interface {
         self.name.as_str()
     }
 
-    pub fn mtu(&self, mtu: Option<i32>) -> Result<i32> {
+    pub fn mtu(&self, mtu: Option<i32>) -> Result<i32, Error> {
         let mut req = ifreq::new(self.name());
         if let Some(mtu) = mtu {
             req.ifr_ifru.ifru_mtu = mtu;
@@ -97,7 +97,7 @@ impl Interface {
         Ok(unsafe { req.ifr_ifru.ifru_mtu })
     }
 
-    pub fn netmask(&self, netmask: Option<Ipv4Addr>) -> Result<Ipv4Addr> {
+    pub fn netmask(&self, netmask: Option<Ipv4Addr>) -> Result<Ipv4Addr, Error> {
         let mut req = ifreq::new(self.name());
         if let Some(netmask) = netmask {
             req.ifr_ifru.ifru_netmask = netmask.to_address();
@@ -108,7 +108,7 @@ impl Interface {
         Ok(unsafe { Ipv4Addr::from_address(req.ifr_ifru.ifru_netmask) })
     }
 
-    pub fn address(&self, address: Option<Ipv4Addr>) -> Result<Ipv4Addr> {
+    pub fn address(&self, address: Option<Ipv4Addr>) -> Result<Ipv4Addr, Error> {
         let mut req = ifreq::new(self.name());
         if let Some(address) = address {
             req.ifr_ifru.ifru_addr = address.to_address();
@@ -119,7 +119,7 @@ impl Interface {
         Ok(unsafe { Ipv4Addr::from_address(req.ifr_ifru.ifru_addr) })
     }
 
-    pub fn destination(&self, dst: Option<Ipv4Addr>) -> Result<Ipv4Addr> {
+    pub fn destination(&self, dst: Option<Ipv4Addr>) -> Result<Ipv4Addr, Error> {
         let mut req = ifreq::new(self.name());
         if let Some(dst) = dst {
             req.ifr_ifru.ifru_dstaddr = dst.to_address();
@@ -130,7 +130,7 @@ impl Interface {
         Ok(unsafe { Ipv4Addr::from_address(req.ifr_ifru.ifru_dstaddr) })
     }
 
-    pub fn broadcast(&self, broadcast: Option<Ipv4Addr>) -> Result<Ipv4Addr> {
+    pub fn broadcast(&self, broadcast: Option<Ipv4Addr>) -> Result<Ipv4Addr, Error> {
         let mut req = ifreq::new(self.name());
         if let Some(broadcast) = broadcast {
             req.ifr_ifru.ifru_broadaddr = broadcast.to_address();
@@ -141,7 +141,7 @@ impl Interface {
         Ok(unsafe { Ipv4Addr::from_address(req.ifr_ifru.ifru_broadaddr) })
     }
 
-    pub fn flags(&self, flags: Option<i16>) -> Result<i16> {
+    pub fn flags(&self, flags: Option<i16>) -> Result<i16, Error> {
         let mut req = ifreq::new(self.name());
         unsafe { siocgifflags(self.socket, &mut req) }?;
         if let Some(flags) = flags {
@@ -151,21 +151,21 @@ impl Interface {
         Ok(unsafe { req.ifr_ifru.ifru_flags })
     }
 
-    pub fn owner(&self, owner: i32) -> Result<()> {
+    pub fn owner(&self, owner: i32) -> Result<(), Error> {
         for fd in self.fds.iter() {
             unsafe { tunsetowner(*fd, owner as _) }?;
         }
         Ok(())
     }
 
-    pub fn group(&self, group: i32) -> Result<()> {
+    pub fn group(&self, group: i32) -> Result<(), Error> {
         for fd in self.fds.iter() {
             unsafe { tunsetgroup(*fd, group as _) }?;
         }
         Ok(())
     }
 
-    pub fn persist(&self) -> Result<()> {
+    pub fn persist(&self) -> Result<(), Error> {
         for fd in self.fds.iter() {
             unsafe { tunsetpersist(*fd, 1) }?;
         }

@@ -1,11 +1,12 @@
-use super::result::Result;
-#[cfg(target_os = "linux")]
-use crate::linux::params::Params;
-#[cfg(target_os = "linux")]
-use crate::tun::Tun;
 use core::convert::From;
-use libc::{IFF_NO_PI, IFF_TAP, IFF_TUN};
+
 use std::net::Ipv4Addr;
+
+use libc::{IFF_NO_PI, IFF_TAP, IFF_TUN};
+
+use crate::error::Error;
+use crate::linux::params::Params;
+use crate::tun::Tun;
 
 /// Represents a factory to build new instances of [`Tun`](struct.Tun.html).
 pub struct TunBuilder<'a> {
@@ -163,21 +164,12 @@ impl<'a> TunBuilder<'a> {
     }
 
     /// Builds a new instance of [`Tun`](struct.Tun.html).
-    pub fn try_build(self) -> Result<Tun> {
+    pub fn try_build(self) -> Result<Tun, Error> {
         Tun::new(self.into())
-    }
-
-    /// Builds multiple instances of [`Tun`](struct.Tun.html) with `IFF_MULTI_QUEUE` flag.
-    ///
-    /// Internally this creates multiple file descriptors to parallelize packet sending and receiving.
-    #[cfg(target_os = "linux")]
-    pub fn try_build_mq(self, queues: usize) -> Result<Vec<Tun>> {
-        Tun::new_mq(self.into(), queues)
     }
 }
 
 impl<'a> From<TunBuilder<'a>> for Params {
-    #[cfg(target_os = "linux")]
     fn from(builder: TunBuilder) -> Self {
         Params {
             name: if builder.name.is_empty() {
@@ -202,10 +194,5 @@ impl<'a> From<TunBuilder<'a>> for Params {
             broadcast: builder.broadcast,
             netmask: builder.netmask,
         }
-    }
-
-    #[cfg(not(any(target_os = "linux")))]
-    fn from(builder: TunBuilder) -> Self {
-        unimplemented!()
     }
 }

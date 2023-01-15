@@ -3,10 +3,14 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
-use std::os::raw::{c_char, c_int, c_short, c_uchar, c_ulong, c_ushort};
-use std::{ffi::CStr, mem, ptr, str};
+use std::{
+    ffi::CStr,
+    mem,
+    os::raw::{c_char, c_int, c_short, c_uchar, c_ulong, c_ushort},
+    ptr, str,
+};
 
-const IFNAMSIZ: u32 = 16;
+const IFNAMSIZ: usize = 16;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -62,7 +66,7 @@ impl ifreq {
     pub fn new(name: &str) -> Self {
         let mut req: ifreq = unsafe { mem::zeroed() };
         if !name.is_empty() {
-            let len = name.len().min(IFNAMSIZ as usize - 1);
+            let len = name.len().min(IFNAMSIZ - 1);
             // Done just to make sure we don't truncate
             // on an UTF-8 code point boundary.
             let name = &name[..len];
