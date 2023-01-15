@@ -1,12 +1,12 @@
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 use tokio::io::AsyncReadExt;
+use tokio_tun::Builder;
 use tokio_tun::Error;
-use tokio_tun::TunBuilder;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let tun = TunBuilder::new()
+    let tun = Builder::new()
         .name("")
         .tap(false)
         .packet_info(false)
@@ -16,7 +16,7 @@ async fn main() -> Result<(), Error> {
         .destination(Ipv4Addr::new(10, 1, 0, 1))
         .broadcast(Ipv4Addr::BROADCAST)
         .netmask(Ipv4Addr::new(255, 255, 255, 0))
-        .try_build()?;
+        .build()?;
 
     println!("-----------");
     println!("tun created");

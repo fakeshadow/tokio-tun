@@ -1,9 +1,29 @@
 use std::{
     io::{self, Read, Write},
-    os::unix::io::{AsRawFd, FromRawFd, RawFd},
+    os::{
+        raw::c_char,
+        unix::io::{AsRawFd, FromRawFd, RawFd},
+    },
 };
 
+use super::syscall;
+
 pub struct TunIo(RawFd);
+
+impl TunIo {
+    pub fn from_path(path: &[u8]) -> Self {
+        // SAFETY:
+        // call to libc.
+        unsafe {
+            let fd = libc::open(
+                path.as_ptr().cast::<c_char>(),
+                libc::O_RDWR | libc::O_NONBLOCK,
+            );
+
+            Self(FromRawFd::from_raw_fd(fd))
+        }
+    }
+}
 
 impl FromRawFd for TunIo {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
@@ -18,49 +38,23 @@ impl AsRawFd for TunIo {
 }
 
 impl Read for TunIo {
-    #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.recv(buf)
+        syscall!(read(self.0, buf.as_ptr() as *mut _, buf.len() as _)).map(|n| n as _)
     }
 }
 
 impl Write for TunIo {
-    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.send(buf)
+        syscall!(write(self.0, buf.as_ptr() as *const _, buf.len() as _)).map(|n| n as _)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let ret = unsafe { libc::fsync(self.0) };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-}
-
-impl TunIo {
-    fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = unsafe { libc::read(self.0, buf.as_ptr() as *mut _, buf.len() as _) };
-        if n < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(n as _)
-    }
-
-    fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        let n = unsafe { libc::write(self.0, buf.as_ptr() as *const _, buf.len() as _) };
-        if n < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(n as _)
+        syscall!(fsync(self.0)).map(|_| ())
     }
 }
 
 impl Drop for TunIo {
     fn drop(&mut self) {
-        // SAFETY:
-        // drop have exclusive access to fd.
-        unsafe { libc::close(self.0) };
+        let _ = syscall!(close(self.0));
     }
 }

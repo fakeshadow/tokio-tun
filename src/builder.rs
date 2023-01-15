@@ -1,16 +1,12 @@
-use core::convert::From;
-
 use std::net::Ipv4Addr;
 
 use libc::{IFF_NO_PI, IFF_TAP, IFF_TUN};
 
-use crate::error::Error;
-use crate::linux::params::Params;
-use crate::tun::Tun;
+use super::{error::Error, linux::params::Params, tun::Tun};
 
 /// Represents a factory to build new instances of [`Tun`](struct.Tun.html).
-pub struct TunBuilder<'a> {
-    name: &'a str,
+pub struct Builder {
+    name: String,
     is_tap: bool,
     packet_info: bool,
     persist: bool,
@@ -24,10 +20,17 @@ pub struct TunBuilder<'a> {
     netmask: Option<Ipv4Addr>,
 }
 
-impl<'a> Default for TunBuilder<'a> {
+impl Default for Builder {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Builder {
+    /// Creates a new instance of builder.
+    pub const fn new() -> Self {
         Self {
-            name: "",
+            name: String::new(),
             owner: None,
             group: None,
             is_tap: false,
@@ -41,17 +44,10 @@ impl<'a> Default for TunBuilder<'a> {
             netmask: None,
         }
     }
-}
-
-impl<'a> TunBuilder<'a> {
-    /// Creates a new instance of [`TunBuilder`](struct.TunBuilder.html).
-    pub fn new() -> Self {
-        Default::default()
-    }
 
     /// Sets the name of device (max length: 16 characters), if it is empty, then device name is set by kernel. Default value is empty.
-    pub fn name(mut self, name: &'a str) -> Self {
-        self.name = name;
+    pub fn name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
         self
     }
 
@@ -164,35 +160,31 @@ impl<'a> TunBuilder<'a> {
     }
 
     /// Builds a new instance of [`Tun`](struct.Tun.html).
-    pub fn try_build(self) -> Result<Tun, Error> {
-        Tun::new(self.into())
-    }
-}
-
-impl<'a> From<TunBuilder<'a>> for Params {
-    fn from(builder: TunBuilder) -> Self {
-        Params {
-            name: if builder.name.is_empty() {
+    pub fn build(self) -> Result<Tun, Error> {
+        let params = Params {
+            name: if self.name.is_empty() {
                 None
             } else {
-                Some(builder.name.into())
+                Some(self.name)
             },
             flags: {
-                let mut flags = if builder.is_tap { IFF_TAP } else { IFF_TUN } as _;
-                if !builder.packet_info {
+                let mut flags = if self.is_tap { IFF_TAP } else { IFF_TUN } as _;
+                if !self.packet_info {
                     flags |= IFF_NO_PI as i16;
                 }
                 flags
             },
-            persist: builder.persist,
-            up: builder.up,
-            mtu: builder.mtu,
-            owner: builder.owner,
-            group: builder.group,
-            address: builder.address,
-            destination: builder.destination,
-            broadcast: builder.broadcast,
-            netmask: builder.netmask,
-        }
+            persist: self.persist,
+            up: self.up,
+            mtu: self.mtu,
+            owner: self.owner,
+            group: self.group,
+            address: self.address,
+            destination: self.destination,
+            broadcast: self.broadcast,
+            netmask: self.netmask,
+        };
+
+        Tun::new(params)
     }
 }

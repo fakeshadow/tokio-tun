@@ -3,13 +3,11 @@ use core::{
     task::{self, ready, Context, Poll},
 };
 
-use std::net::Ipv4Addr;
-use std::os::raw::c_char;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::Arc;
 use std::{
     io::{self, Read, Write},
-    os::fd::FromRawFd,
+    net::Ipv4Addr,
+    os::unix::io::{AsRawFd, RawFd},
+    sync::Arc,
 };
 
 use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
@@ -19,7 +17,7 @@ use crate::linux::interface::Interface;
 use crate::linux::io::TunIo;
 use crate::linux::params::Params;
 
-/// Represents a Tun/Tap device. Use [`TunBuilder`](struct.TunBuilder.html) to create a new instance of [`Tun`](struct.Tun.html).
+/// Represents a Tun/Tap device. Use [`Builder`] to create a new instance of Self.
 pub struct Tun {
     iface: Arc<Interface>,
     io: AsyncFd<TunIo>,
@@ -40,7 +38,6 @@ impl AsyncRead for Tun {
         let this = self.get_mut();
         loop {
             let mut guard = ready!(this.io.poll_read_ready_mut(cx))?;
-
             match guard.try_io(|inner| inner.get_mut().read(buf.initialize_unfilled())) {
                 Ok(Ok(n)) => {
                     buf.set_filled(buf.filled().len() + n);
@@ -62,7 +59,6 @@ impl AsyncWrite for Tun {
         let self_mut = self.get_mut();
         loop {
             let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
-
             match guard.try_io(|inner| inner.get_mut().write(buf)) {
                 Ok(result) => return Poll::Ready(result),
                 Err(_would_block) => continue,
@@ -74,7 +70,6 @@ impl AsyncWrite for Tun {
         let self_mut = self.get_mut();
         loop {
             let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
-
             match guard.try_io(|inner| inner.get_mut().flush()) {
                 Ok(result) => return Poll::Ready(result),
                 Err(_) => continue,
@@ -90,35 +85,26 @@ impl AsyncWrite for Tun {
 impl Tun {
     /// Creates a new instance of Tun/Tap device.
     pub(crate) fn new(params: Params) -> Result<Self, Error> {
-        let iface = Self::allocate(params, 1)?;
-        let fd = iface.files()[0];
+        let (iface, mut tuns) = Self::allocate(params, 1)?;
+        let tun = tuns.pop().unwrap();
         Ok(Self {
             iface: Arc::new(iface),
-            // SAFETY:
-            // TODO. currently this is not safe.
-            io: AsyncFd::new(unsafe { FromRawFd::from_raw_fd(fd) })?,
+            io: AsyncFd::new(tun)?,
         })
     }
 
-    fn allocate(params: Params, queues: usize) -> Result<Interface, Error> {
-        static TUN: &[u8] = b"/dev/net/tun\0";
-
-        let fds = (0..queues)
-            .map(|_| unsafe {
-                libc::open(
-                    TUN.as_ptr().cast::<c_char>(),
-                    libc::O_RDWR | libc::O_NONBLOCK,
-                )
-            })
+    fn allocate(params: Params, queues: usize) -> Result<(Interface, Vec<TunIo>), Error> {
+        let tuns = (0..queues)
+            .map(|_| TunIo::from_path(b"/dev/net/tun\0"))
             .collect::<Vec<_>>();
 
         let iface = Interface::new(
-            fds,
+            &tuns,
             params.name.as_deref().unwrap_or_default(),
             params.flags,
         )?;
-        iface.init(params)?;
-        Ok(iface)
+        iface.init(params, &tuns)?;
+        Ok((iface, tuns))
     }
 
     /// Returns the name of Tun/Tap device.

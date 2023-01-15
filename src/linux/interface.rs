@@ -1,8 +1,8 @@
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, os::fd::AsRawFd};
 
 use crate::error::Error;
 
-use super::{address::Ipv4AddrExt, params::Params, request::ifreq};
+use super::{addr_ext::Ipv4AddrExt, params::Params, request::ifreq, syscall};
 
 nix::ioctl_write_int!(tunsetiff, b'T', 202);
 nix::ioctl_write_int!(tunsetpersist, b'T', 203);
@@ -25,37 +25,36 @@ nix::ioctl_read_bad!(siocgifnetmask, libc::SIOCGIFNETMASK, ifreq);
 
 #[derive(Clone)]
 pub struct Interface {
-    fds: Vec<i32>,
     socket: i32,
     name: String,
 }
 
 impl Interface {
-    pub fn new(fds: Vec<i32>, name: &str, mut flags: i16) -> Result<Self, Error> {
+    pub fn new(fds: &[impl AsRawFd], name: &str, mut flags: i16) -> Result<Self, Error> {
         let mut req = ifreq::new(name);
         if fds.len() > 1 {
             flags |= libc::IFF_MULTI_QUEUE as i16;
         }
         req.ifr_ifru.ifru_flags = flags;
-        for &fd in &fds {
-            unsafe { tunsetiff(fd, &req as *const _ as _) }?;
+        for fd in fds {
+            unsafe { tunsetiff(fd.as_raw_fd(), &req as *const _ as _) }?;
         }
+
         Ok(Interface {
-            fds,
             socket: unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) },
             name: req.name().to_owned(),
         })
     }
 
-    pub fn init(&self, params: Params) -> Result<(), Error> {
+    pub fn init(&self, params: Params, fds: &[impl AsRawFd]) -> Result<(), Error> {
         if let Some(mtu) = params.mtu {
             self.mtu(Some(mtu))?;
         }
         if let Some(owner) = params.owner {
-            self.owner(owner)?;
+            self.owner(owner, fds)?;
         }
         if let Some(group) = params.group {
-            self.group(group)?;
+            self.group(group, fds)?;
         }
         if let Some(address) = params.address {
             self.address(Some(address))?;
@@ -70,16 +69,12 @@ impl Interface {
             self.broadcast(Some(broadcast))?;
         }
         if params.persist {
-            self.persist()?;
+            self.persist(fds)?;
         }
         if params.up {
             self.flags(Some(libc::IFF_UP as i16 | libc::IFF_RUNNING as i16))?;
         }
         Ok(())
-    }
-
-    pub fn files(&self) -> &[i32] {
-        &self.fds
     }
 
     pub fn name(&self) -> &str {
@@ -151,23 +146,23 @@ impl Interface {
         Ok(unsafe { req.ifr_ifru.ifru_flags })
     }
 
-    pub fn owner(&self, owner: i32) -> Result<(), Error> {
-        for fd in self.fds.iter() {
-            unsafe { tunsetowner(*fd, owner as _) }?;
+    pub fn owner(&self, owner: i32, fds: &[impl AsRawFd]) -> Result<(), Error> {
+        for fd in fds {
+            unsafe { tunsetowner(fd.as_raw_fd(), owner as _) }?;
         }
         Ok(())
     }
 
-    pub fn group(&self, group: i32) -> Result<(), Error> {
-        for fd in self.fds.iter() {
-            unsafe { tunsetgroup(*fd, group as _) }?;
+    pub fn group(&self, group: i32, fds: &[impl AsRawFd]) -> Result<(), Error> {
+        for fd in fds {
+            unsafe { tunsetgroup(fd.as_raw_fd(), group as _) }?;
         }
         Ok(())
     }
 
-    pub fn persist(&self) -> Result<(), Error> {
-        for fd in self.fds.iter() {
-            unsafe { tunsetpersist(*fd, 1) }?;
+    pub fn persist(&self, fds: &[impl AsRawFd]) -> Result<(), Error> {
+        for fd in fds {
+            unsafe { tunsetpersist(fd.as_raw_fd(), 1) }?;
         }
         Ok(())
     }
@@ -175,6 +170,6 @@ impl Interface {
 
 impl Drop for Interface {
     fn drop(&mut self) {
-        unsafe { libc::close(self.socket) };
+        let _ = syscall!(close(self.socket));
     }
 }
