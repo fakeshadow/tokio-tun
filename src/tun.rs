@@ -95,8 +95,8 @@ impl Tun {
 
     fn allocate(params: Params, queues: usize) -> Result<(Interface, Vec<TunIo>), Error> {
         let tuns = (0..queues)
-            .map(|_| TunIo::from_path(b"/dev/net/tun\0"))
-            .collect::<Vec<_>>();
+            .map(|_| TunIo::try_from_path(b"/dev/net/tun\0"))
+            .collect::<io::Result<Vec<_>>>()?;
 
         let iface = Interface::new(
             &tuns,

@@ -11,23 +11,17 @@ use super::syscall;
 pub struct TunIo(RawFd);
 
 impl TunIo {
-    pub fn from_path(path: &[u8]) -> Self {
-        // SAFETY:
-        // call to libc.
-        unsafe {
-            let fd = libc::open(
-                path.as_ptr().cast::<c_char>(),
-                libc::O_RDWR | libc::O_NONBLOCK,
-            );
-
-            Self(FromRawFd::from_raw_fd(fd))
-        }
-    }
-}
-
-impl FromRawFd for TunIo {
-    unsafe fn from_raw_fd(fd: RawFd) -> Self {
-        Self(fd)
+    pub fn try_from_path(path: &[u8]) -> io::Result<Self> {
+        syscall!(open(
+            path.as_ptr().cast::<c_char>(),
+            libc::O_RDWR | libc::O_NONBLOCK,
+        ))
+        .map(|fd| {
+            // SAFETY:
+            // TunIo is the sole owner of opened file.
+            let raw = unsafe { FromRawFd::from_raw_fd(fd) };
+            Self(raw)
+        })
     }
 }
 
