@@ -1,4 +1,7 @@
-use std::{net::Ipv4Addr, os::fd::AsRawFd};
+use std::{
+    net::Ipv4Addr,
+    os::fd::{AsRawFd, RawFd},
+};
 
 use crate::error::Error;
 
@@ -23,10 +26,9 @@ nix::ioctl_read_bad!(siocgifdstaddr, libc::SIOCGIFDSTADDR, ifreq);
 nix::ioctl_read_bad!(siocgifbrdaddr, libc::SIOCGIFBRDADDR, ifreq);
 nix::ioctl_read_bad!(siocgifnetmask, libc::SIOCGIFNETMASK, ifreq);
 
-#[derive(Clone)]
 pub struct Interface {
-    socket: i32,
-    name: String,
+    socket: RawFd,
+    name: Box<str>,
 }
 
 impl Interface {
@@ -40,9 +42,11 @@ impl Interface {
             unsafe { tunsetiff(fd.as_raw_fd(), &req as *const _ as _) }?;
         }
 
+        let socket = syscall!(socket(libc::AF_INET, libc::SOCK_DGRAM, 0))?;
+
         Ok(Interface {
-            socket: unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) },
-            name: req.name().to_owned(),
+            socket,
+            name: req.name().into(),
         })
     }
 
@@ -78,7 +82,7 @@ impl Interface {
     }
 
     pub fn name(&self) -> &str {
-        self.name.as_str()
+        &*self.name
     }
 
     pub fn mtu(&self, mtu: Option<i32>) -> Result<i32, Error> {

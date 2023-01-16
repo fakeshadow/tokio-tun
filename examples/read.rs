@@ -1,19 +1,23 @@
-use std::net::Ipv4Addr;
-use std::os::unix::io::AsRawFd;
+use std::{net::Ipv4Addr, os::unix::io::AsRawFd};
+
+use pnet::packet::{
+    icmp::{IcmpPacket, IcmpType},
+    ipv4::Ipv4Packet,
+    Packet,
+};
 use tokio::io::AsyncReadExt;
-use tokio_tun::Builder;
-use tokio_tun::Error;
+use tokio_tun::{Builder, Error};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let tun = Builder::new()
+    let mut tun = Builder::new()
         .name("")
         .tap(false)
         .packet_info(false)
         .mtu(1350)
         .up()
-        .address(Ipv4Addr::new(10, 0, 0, 1))
-        .destination(Ipv4Addr::new(10, 1, 0, 1))
+        .address(Ipv4Addr::new(10, 21, 22, 1))
+        .destination(Ipv4Addr::new(10, 22, 23, 1))
         .broadcast(Ipv4Addr::BROADCAST)
         .netmask(Ipv4Addr::new(255, 255, 255, 0))
         .build()?;
@@ -35,14 +39,19 @@ async fn main() -> Result<(), Error> {
     );
 
     println!("---------------------");
-    println!("ping 10.1.0.2 to test");
+    println!("ping 10.22.23.2 to test");
     println!("---------------------");
-
-    let (mut reader, mut _writer) = tokio::io::split(tun);
 
     let mut buf = [0u8; 1024];
     loop {
-        let n = reader.read(&mut buf).await?;
-        println!("reading {} bytes: {:?}", n, &buf[..n]);
+        let n = tun.read(&mut buf).await?;
+
+        if let Some(ip) = Ipv4Packet::new(&mut buf[..n]) {
+            if let Some(icmp) = IcmpPacket::new(ip.payload()) {
+                if icmp.get_icmp_type() == IcmpType::new(8) {
+                    println!("{icmp:?}");
+                }
+            }
+        }
     }
 }

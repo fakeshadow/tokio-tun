@@ -2,7 +2,7 @@ use std::{
     io::{self, Read, Write},
     os::{
         raw::c_char,
-        unix::io::{AsRawFd, FromRawFd, RawFd},
+        unix::io::{AsRawFd, RawFd},
     },
 };
 
@@ -16,12 +16,7 @@ impl TunIo {
             path.as_ptr().cast::<c_char>(),
             libc::O_RDWR | libc::O_NONBLOCK,
         ))
-        .map(|fd| {
-            // SAFETY:
-            // TunIo is the sole owner of opened file.
-            let raw = unsafe { FromRawFd::from_raw_fd(fd) };
-            Self(raw)
-        })
+        .map(Self)
     }
 }
 

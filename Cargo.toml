@@ -19,3 +19,4 @@ nix = { version = "0.26", default-features = false, features = ["ioctl"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+pnet = { version = "0.31.0" }
