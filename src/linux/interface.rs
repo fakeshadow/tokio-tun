@@ -82,7 +82,7 @@ impl Interface {
     }
 
     pub fn name(&self) -> &str {
-        &*self.name
+        &self.name
     }
 
     pub fn mtu(&self, mtu: Option<i32>) -> Result<i32, Error> {

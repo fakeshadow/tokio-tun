@@ -1,6 +1,6 @@
 use core::{
     pin::Pin,
-    task::{self, ready, Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use std::{
@@ -34,7 +34,7 @@ impl AsyncRead for Tun {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
-    ) -> task::Poll<io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
         loop {
             let mut guard = ready!(this.io.poll_read_ready_mut(cx))?;
@@ -55,7 +55,7 @@ impl AsyncWrite for Tun {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> task::Poll<io::Result<usize>> {
+    ) -> Poll<io::Result<usize>> {
         let self_mut = self.get_mut();
         loop {
             let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
@@ -66,7 +66,7 @@ impl AsyncWrite for Tun {
         }
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> task::Poll<io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let self_mut = self.get_mut();
         loop {
             let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
@@ -77,7 +77,7 @@ impl AsyncWrite for Tun {
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> task::Poll<io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.poll_flush(cx)
     }
 }
