@@ -38,13 +38,18 @@ impl AsyncRead for Tun {
         let this = self.get_mut();
         loop {
             let mut guard = ready!(this.io.poll_read_ready_mut(cx))?;
-            match guard.try_io(|inner| inner.get_mut().read(buf.initialize_unfilled())) {
-                Ok(Ok(n)) => {
-                    buf.set_filled(buf.filled().len() + n);
-                    return Poll::Ready(Ok(()));
-                }
-                Ok(Err(err)) => return Poll::Ready(Err(err)),
-                Err(_) => continue,
+            // SAFETY:
+            // work around as stable std lack read_buf feature.
+            let b = unsafe { &mut *(buf.unfilled_mut() as *mut [u8]) };
+            if let Ok(res) = guard.try_io(|inner| inner.get_mut().read(b)) {
+                return Poll::Ready(res.map(|n| {
+                    // SAFETY:
+                    // TunIo is trusted to return correct count of bytes written to buffer.
+                    unsafe {
+                        buf.assume_init(n);
+                    }
+                    buf.advance(n);
+                }));
             }
         }
     }
@@ -56,24 +61,22 @@ impl AsyncWrite for Tun {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        let self_mut = self.get_mut();
+        let this = self.get_mut();
         loop {
-            let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
-            match guard.try_io(|inner| inner.get_mut().write(buf)) {
-                Ok(result) => return Poll::Ready(result),
-                Err(_would_block) => continue,
-            }
+            let mut guard = ready!(this.io.poll_write_ready_mut(cx))?;
+            if let Ok(res) = guard.try_io(|inner| inner.get_mut().write(buf)) {
+                return Poll::Ready(res);
+            };
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let self_mut = self.get_mut();
+        let this = self.get_mut();
         loop {
-            let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
-            match guard.try_io(|inner| inner.get_mut().flush()) {
-                Ok(result) => return Poll::Ready(result),
-                Err(_) => continue,
-            }
+            let mut guard = ready!(this.io.poll_write_ready_mut(cx))?;
+            if let Ok(res) = guard.try_io(|inner| inner.get_mut().flush()) {
+                return Poll::Ready(res);
+            };
         }
     }
 
